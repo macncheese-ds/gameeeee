@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Tennis for Two — Game</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Tennis for Two</h1>
+    <div class="info">
+      <div class="score">
+        <span id="score-left">0</span>
+        <span>:</span>
+        <span id="score-right">0</span>
+      </div>
+      <div class="controls">Controls: W/S = left paddle, ↑/↓ = right paddle. Space = Start/Pause. R = Reset</div>
+    </div>
+
+    <canvas id="game" width="800" height="450" aria-label="Tennis for Two game canvas"></canvas>
+
+    <div class="buttons">
+      <button id="start">Start / Pause</button>
+      <button id="reset">Reset</button>
+    </div>
+
+    <footer>
+      <small>Keyboard controls recommended. Works on desktop browsers.</small>
+    </footer>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
