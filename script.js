@@ -17,13 +17,15 @@ let side = null; // 'left' or 'right' when connected
 let isNetwork = false;
 
 // Config
-const PADDLE_SPEED = 6;
+// increased paddle speed for snappier movement
+const PADDLE_SPEED = 12;
 const MAX_BOUNCE_ANGLE = Math.PI/3; // 60 degrees
 
 // Input
 const keys = {};
-window.addEventListener('keydown', e => { keys[e.key] = true; if(e.key === ' '){ if(isNetwork){ socket && socket.emit('toggle'); } else { toggleRun(); } e.preventDefault(); } if(e.key === 'r' || e.key === 'R'){ if(isNetwork){ socket && socket.emit('reset'); } else { reset(); } } });
-window.addEventListener('keyup', e => { keys[e.key] = false; });
+let lastKey = null;
+window.addEventListener('keydown', e => { keys[e.key] = true; lastKey = e.key; console.log('keydown', e.key); if(e.key === ' '){ if(isNetwork){ socket && socket.emit('toggle'); } else { toggleRun(); } e.preventDefault(); } if(e.key === 'r' || e.key === 'R'){ if(isNetwork){ socket && socket.emit('reset'); } else { reset(); } } });
+window.addEventListener('keyup', e => { keys[e.key] = false; lastKey = null; });
 
 // Buttons
 document.getElementById('start').addEventListener('click', ()=>{ if(isNetwork){ socket && socket.emit('toggle'); } else { toggleRun(); } });
@@ -40,15 +42,22 @@ function update(dt){
   if(isNetwork) {
     // send current inputs to server for authoritative update
     if(!socket) return;
-    const input = { up: false, down: false };
-    if(side === 'left'){
-      input.up = !!(keys['w'] || keys['W']);
-      input.down = !!(keys['s'] || keys['S']);
-    } else if(side === 'right'){
-      input.up = !!keys['ArrowUp'];
-      input.down = !!keys['ArrowDown'];
-    }
+    // send all possible key states so server can map based on assigned side
+    const input = {
+      w: !!(keys['w'] || keys['W']),
+      s: !!(keys['s'] || keys['S']),
+      up: !!keys['ArrowUp'],
+      down: !!keys['ArrowDown']
+    };
+    const any = input.w || input.s || input.up || input.down;
+    if(any) console.log('sending raw input', input, 'side=', side);
     socket.emit('input', input);
+    socket.emit('debug-input', { input, sideGuess: side });
+    // update debug display with last sent input
+    if(window.document){
+      const dbg = document.getElementById('net-debug');
+      if(dbg) dbg.textContent = `ball ${Math.round(ball.x)} ${Math.round(ball.y)} running=${isNetwork ? 'net' : running} key=${lastKey||'-'} sent=${input.up? 'up':'' }${input.down? 'down':''}`;
+    }
     return; // server will emit state which we render
   }
 
@@ -161,6 +170,29 @@ canvas.tabIndex = 1000;
 canvas.style.outline = 'none';
 canvas.addEventListener('click', ()=> canvas.focus());
 
+// Touch / on-screen controls
+function bindButton(id, downKeys){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.addEventListener('pointerdown', (e)=>{
+    e.preventDefault();
+    downKeys.forEach(k=> keys[k]=true);
+    // send immediate input if network
+    if(isNetwork && socket) socket.emit('input', { w: keys['w'], s: keys['s'], up: keys['ArrowUp'], down: keys['ArrowDown'] });
+  });
+  el.addEventListener('pointerup', (e)=>{
+    e.preventDefault();
+    downKeys.forEach(k=> keys[k]=false);
+    if(isNetwork && socket) socket.emit('input', { w: keys['w'], s: keys['s'], up: keys['ArrowUp'], down: keys['ArrowDown'] });
+  });
+  el.addEventListener('pointerleave', (e)=>{ downKeys.forEach(k=> keys[k]=false); if(isNetwork && socket) socket.emit('input', { w: keys['w'], s: keys['s'], up: keys['ArrowUp'], down: keys['ArrowDown'] }); });
+}
+
+bindButton('left-up', ['w']);
+bindButton('left-down', ['s']);
+bindButton('right-up', ['ArrowUp']);
+bindButton('right-down', ['ArrowDown']);
+
 // network connect
 function connectToServer(){
   if(socket){ socket.disconnect(); socket = null; isNetwork = false; side = null; document.getElementById('connect').textContent = 'Play on LAN'; reset(); return; }
@@ -186,6 +218,8 @@ function connectToServer(){
   });
 
   socket.on('state', s => {
+  // debug: log small snapshot
+  console.log('state recv', Math.round(s.ball.x), Math.round(s.ball.y), s.left.y, s.right.y, 'running=', s.running);
     applyState(s);
   });
 
@@ -200,6 +234,11 @@ function applyState(s){
   ball.x = s.ball.x; ball.y = s.ball.y; ball.vx = s.ball.vx; ball.vy = s.ball.vy;
   document.getElementById('score-left').textContent = left.score;
   document.getElementById('score-right').textContent = right.score;
+  // show quick debug info
+  const dbg = document.getElementById('net-debug');
+  if(dbg) dbg.textContent = `ball ${Math.round(ball.x)} ${Math.round(ball.y)} running=${s.running}`;
+  // force draw immediately to reflect authoritative state
+  draw();
 }
 
 // show tiny hint

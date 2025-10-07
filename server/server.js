@@ -44,14 +44,33 @@ io.on('connection', socket => {
     // data: { up: bool, down: bool }
     const s = players[socket.id];
     if(!s) return;
-    const speed = 6;
-    if(data.up) state[s].y -= speed;
-    if(data.down) state[s].y += speed;
+    // debug log: show inputs when received
+    console.log(`input from ${socket.id} (${s}):`, data);
+  const speed = 12;
+    // data may include raw keys: w/s and up/down
+    if(s === 'left'){
+      if(data.w) state.left.y -= speed;
+      if(data.s) state.left.y += speed;
+    } else if(s === 'right'){
+      if(data.up) state.right.y -= speed;
+      if(data.down) state.right.y += speed;
+    }
     state[s].y = Math.max(0, Math.min(450 - 80, state[s].y));
   });
 
-  socket.on('toggle', ()=>{ state.running = !state.running; });
-  socket.on('reset', ()=>{ state.left.score = 0; state.right.score = 0; state.ball.x=400; state.ball.y=225; state.ball.vx = 5; state.ball.vy = 2.5; state.running = false; });
+  socket.on('toggle', ()=>{ 
+    state.running = !state.running; 
+    console.log('toggle received from', socket.id, 'new running=', state.running);
+  });
+
+  socket.on('reset', ()=>{ 
+    state.left.score = 0; state.right.score = 0; state.ball.x=400; state.ball.y=225; state.ball.vx = 5; state.ball.vy = 2.5; state.running = false; 
+    console.log('reset received from', socket.id);
+  });
+
+  socket.on('debug-input', (d) => {
+    console.log('debug-input from', socket.id, d);
+  });
 
   socket.on('disconnect', ()=>{
     delete players[socket.id];
@@ -98,6 +117,28 @@ setInterval(()=>{
   io.emit('state', state);
 }, 1000/60);
 
+// diagnostic: print ball position once per second when running
+setInterval(()=>{
+  if(state.running){
+    console.log('ball pos', Math.round(state.ball.x), Math.round(state.ball.y), 'vx', state.ball.vx.toFixed(2), 'vy', state.ball.vy.toFixed(2));
+  }
+}, 1000);
+
+// diagnostic: print paddle positions once per second
+setInterval(()=>{
+  console.log('paddles', 'left.y=', Math.round(state.left.y), 'right.y=', Math.round(state.right.y));
+}, 1000);
+
 function serve(toRight){ state.ball.x = 400; state.ball.y = 225; const dir = toRight ? 1 : -1; state.ball.vx = 5 * dir; state.ball.vy = (Math.random()*6 - 3); }
 
-server.listen(PORT, ()=> console.log('server listening', PORT));
+server.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} already in use. If another instance is running, stop it or choose a different PORT.`);
+  } else {
+    console.error('Server error:', err);
+  }
+  process.exitCode = 1;
+});
+
+// Prefer binding to IPv4 explicitly to avoid IPv6 EADDRINUSE in some environments
+server.listen(PORT, '0.0.0.0', () => console.log('server listening', PORT));
