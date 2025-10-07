@@ -1,15 +1,20 @@
-// Simple Tennis-for-Two / Pong-like game
+// Simple Tennis-for-Two / Pong-like game with optional LAN multiplayer via socket.io
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
 const W = canvas.width, H = canvas.height;
 
-// Game state
+// Game state (rendered)
 let left = { x: 20, y: H/2 - 40, w: 12, h: 80, vy:0, score:0 };
 let right = { x: W - 20 - 12, y: H/2 - 40, w:12, h:80, vy:0, score:0 };
 let ball = { x: W/2, y: H/2, vx: 5, vy: 2.5, r:9 };
 let running = false;
 let lastTime = 0;
+
+// Network
+let socket = null;
+let side = null; // 'left' or 'right' when connected
+let isNetwork = false;
 
 // Config
 const PADDLE_SPEED = 6;
@@ -17,12 +22,13 @@ const MAX_BOUNCE_ANGLE = Math.PI/3; // 60 degrees
 
 // Input
 const keys = {};
-window.addEventListener('keydown', e => { keys[e.key] = true; if(e.key === ' '){ toggleRun(); e.preventDefault(); } if(e.key === 'r' || e.key === 'R'){ reset(); } });
+window.addEventListener('keydown', e => { keys[e.key] = true; if(e.key === ' '){ if(isNetwork){ socket && socket.emit('toggle'); } else { toggleRun(); } e.preventDefault(); } if(e.key === 'r' || e.key === 'R'){ if(isNetwork){ socket && socket.emit('reset'); } else { reset(); } } });
 window.addEventListener('keyup', e => { keys[e.key] = false; });
 
 // Buttons
-document.getElementById('start').addEventListener('click', toggleRun);
-document.getElementById('reset').addEventListener('click', reset);
+document.getElementById('start').addEventListener('click', ()=>{ if(isNetwork){ socket && socket.emit('toggle'); } else { toggleRun(); } });
+document.getElementById('reset').addEventListener('click', ()=>{ if(isNetwork){ socket && socket.emit('reset'); } else { reset(); } });
+document.getElementById('connect').addEventListener('click', connectToServer);
 
 function toggleRun(){ running = !running; if(running){ requestAnimationFrame(loop); document.getElementById('start').textContent = 'Pause'; } else { document.getElementById('start').textContent = 'Start'; } }
 
@@ -31,7 +37,22 @@ function reset(){ running = false; left.score = 0; right.score = 0; ball.x = W/2
 function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
 
 function update(dt){
-  // paddles by input
+  if(isNetwork) {
+    // send current inputs to server for authoritative update
+    if(!socket) return;
+    const input = { up: false, down: false };
+    if(side === 'left'){
+      input.up = !!(keys['w'] || keys['W']);
+      input.down = !!(keys['s'] || keys['S']);
+    } else if(side === 'right'){
+      input.up = !!keys['ArrowUp'];
+      input.down = !!keys['ArrowDown'];
+    }
+    socket.emit('input', input);
+    return; // server will emit state which we render
+  }
+
+  // paddles by input (local)
   left.vy = 0; right.vy = 0;
   if(keys['w'] || keys['W']) left.vy = -PADDLE_SPEED;
   if(keys['s'] || keys['S']) left.vy = PADDLE_SPEED;
@@ -53,13 +74,12 @@ function update(dt){
   // left paddle
   if(ball.x - ball.r <= left.x + left.w && ball.x - ball.r >= left.x){
     if(ball.y >= left.y && ball.y <= left.y + left.h){
-      // compute bounce based on where it hit the paddle
-      const relative = (ball.y - (left.y + left.h/2)) / (left.h/2); // -1 .. 1
+      const relative = (ball.y - (left.y + left.h/2)) / (left.h/2);
       const angle = relative * MAX_BOUNCE_ANGLE;
-      const speed = Math.hypot(ball.vx, ball.vy) * 1.05; // increase speed slightly
+      const speed = Math.hypot(ball.vx, ball.vy) * 1.05;
       ball.vx = Math.cos(angle) * speed;
       ball.vy = Math.sin(angle) * speed;
-      if(ball.vx < 0) ball.vx *= -1; // ensure it goes right
+      if(ball.vx < 0) ball.vx *= -1;
       ball.x = left.x + left.w + ball.r + 0.1;
     }
   }
@@ -113,11 +133,20 @@ function draw(){
 
   // small glow
   ctx.beginPath(); ctx.fillStyle='rgba(255,200,120,0.08)'; ctx.arc(ball.x, ball.y, ball.r*2.2,0,Math.PI*2); ctx.fill();
+
+  // show connection/side
+  if(isNetwork){
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(8, H-26, 180, 18);
+    ctx.fillStyle = '#cfe8ff';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('Network play — side: ' + (side||'...'), 12, H-12);
+  }
 }
 
 function roundRect(ctx,x,y,w,h,r,fill,stroke){ if(r===undefined) r=5; ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); if(fill) ctx.fill(); if(stroke) ctx.stroke(); }
 
-function loop(ts){ if(!lastTime) lastTime = ts; const dt = (ts - lastTime)/1000; lastTime = ts; update(dt); draw(); if(running) requestAnimationFrame(loop); }
+function loop(ts){ if(!lastTime) lastTime = ts; const dt = (ts - lastTime)/1000; lastTime = ts; update(dt); draw(); if(!isNetwork ? running : true) requestAnimationFrame(loop); }
 
 // initial draw
 reset();
@@ -132,5 +161,46 @@ canvas.tabIndex = 1000;
 canvas.style.outline = 'none';
 canvas.addEventListener('click', ()=> canvas.focus());
 
+// network connect
+function connectToServer(){
+  if(socket){ socket.disconnect(); socket = null; isNetwork = false; side = null; document.getElementById('connect').textContent = 'Play on LAN'; reset(); return; }
+  // try connect to same host on port 10002 (server)
+  if(typeof io === 'undefined'){
+    alert('Socket.IO client not loaded. Check network or use the bundled socket.io client.');
+    return;
+  }
+  // prefer explicit protocol
+  const host = window.location.hostname || 'localhost';
+  const url = (window.location.protocol === 'https:' ? 'https://' : 'http://') + host + ':10002';
+  socket = io(url, { reconnectionAttempts: 3, timeout: 3000 });
+  socket.on('connect_error', (err)=>{ console.error('connect_error', err); alert('Unable to connect to game server on port 10002'); socket.disconnect(); socket = null; });
+
+  socket.on('full', ()=>{ alert('Server is full (2 players).'); socket.disconnect(); socket = null; });
+
+  socket.on('init', (d)=>{
+    side = d.side;
+    isNetwork = true;
+    // set initial rendered state
+    if(d.state){ applyState(d.state); }
+    document.getElementById('connect').textContent = 'Disconnect';
+  });
+
+  socket.on('state', s => {
+    applyState(s);
+  });
+
+  socket.on('players', p => { console.log('players', p); });
+
+  requestAnimationFrame(loop);
+}
+
+function applyState(s){
+  left.y = s.left.y; left.score = s.left.score;
+  right.y = s.right.y; right.score = s.right.score;
+  ball.x = s.ball.x; ball.y = s.ball.y; ball.vx = s.ball.vx; ball.vy = s.ball.vy;
+  document.getElementById('score-left').textContent = left.score;
+  document.getElementById('score-right').textContent = right.score;
+}
+
 // show tiny hint
-console.log('Tennis for Two ready — click the canvas and press Space to start');
+console.log('Tennis for Two ready — click the canvas and press Space to start. Use Play on LAN to connect to a server.');

@@ -21,4 +21,17 @@ Run
 Notes
  - Click the canvas to ensure it receives keyboard focus.
  - Works best on desktop browsers.
+# Multiplayer (LAN)
+
+This project includes a simple Node.js authoritative server (Socket.IO) to play between two devices on the same LAN.
+
+Run steps:
+ - Install dependencies: open PowerShell in `c:\app\gameeeee\server` and run `npm install`.
+ - Start server: `npm start` (server listens on port 10002 by default).
+ - Make sure firewall allows inbound TCP 10002 on the server machine.
+ - Open `http://<server-ip>:10001` in two different devices (the static files are served by nginx on port 10001 if configured) and click "Play on LAN" in both clients. Alternatively open the page directly and click "Play on LAN" which will connect to the socket server at port 10002.
+
+Notes:
+ - The server accepts only two players; a third connection will be rejected.
+ - This is a minimal authoritative server — it keeps the ball and scoreboard state.
 # gameeeee

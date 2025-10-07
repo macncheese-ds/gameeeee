@@ -23,6 +23,7 @@
     <div class="buttons">
       <button id="start">Start / Pause</button>
       <button id="reset">Reset</button>
+      <button id="connect">Play on LAN</button>
     </div>
 
     <footer>
@@ -30,6 +31,36 @@
     </footer>
   </div>
 
+  <script>
+    // Dynamic loader for Socket.IO client: try CDN first, then fall back to server endpoint
+    (function(){
+      function loadScript(src, onload, onerror){
+        var s = document.createElement('script');
+        s.src = src;
+        s.async = false;
+        s.onload = onload;
+        s.onerror = onerror;
+        document.head.appendChild(s);
+      }
+
+      var host = window.location.hostname || 'localhost';
+      var triedServer = false;
+
+      loadScript('https://cdn.socket.io/4.7.2/socket.io.min.js', function(){
+        console.log('Loaded socket.io from CDN');
+      }, function(){
+        console.warn('CDN socket.io failed, trying server fallback');
+        // try server fallback (socket.io serves client at /socket.io/socket.io.js)
+        triedServer = true;
+        loadScript((window.location.protocol === 'https:' ? 'https://' : 'http://') + host + ':10002/socket.io/socket.io.js', function(){
+          console.log('Loaded socket.io from server');
+        }, function(){
+          console.error('Failed to load socket.io client from CDN and server fallback');
+          // let script.js detect missing io and show user-friendly message
+        });
+      });
+    })();
+  </script>
   <script src="script.js"></script>
 </body>
 </html>
